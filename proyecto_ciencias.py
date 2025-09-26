@@ -1,257 +1,452 @@
-from ast import While
-from asyncore import write
-from dataclasses import replace
-from gzip import WRITE
-from logging.config import listen
-from msilib.schema import TextStyle
-from time import sleep
-from cgitb import text
-from re import T
-from unicodedata import name
-from unittest import TextTestResult
-from urllib.request import HTTPPasswordMgrWithDefaultRealm
+"""
+Asistente de Voz Personal - Versión Optimizada 2025
+Proyecto de Feria de Ciencias - Solo para Windows
+Autor: Santiago
+"""
+
 import webbrowser
-from xml.sax.saxutils import prepare_input_source
 import speech_recognition as sr
 import pyttsx3
 import pywhatkit
-from pywhatkit.remotekit import start_server
-from flask import Flask, request
-from datetime import date, time, datetime
-import chistesESP as c
 import pyautogui
 import keyboard
+import logging
+from datetime import datetime
+from time import sleep
 from googletrans import Translator
+from typing import Optional, Dict, Any
+import random
 
-r= sr.Recognizer()
+# Configuración de logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
-nombre='santiago'
+class VoiceAssistant:
+    """Clase principal del asistente de voz"""
+    
+    def __init__(self, nombre: str = "santiago"):
+        self.nombre = nombre.lower()
+        self.recognizer = sr.Recognizer()
+        self.traductor = Translator()
+        self.running = True
+        
+        # Configuración del motor de voz
+        self.engine = pyttsx3.init()
+        self._configurar_voz()
+        
+        # Banco de chistes
+        self.chistes = [
+            "¿Por qué los programadores prefieren el modo oscuro? Porque la luz atrae bugs",
+            "¿Qué le dice un bit a otro bit? Nos vemos en el bus",
+            "¿Por qué las computadoras nunca tienen hambre? Porque ya tienen cookies",
+            "¿Cuál es el colmo de un programador? Que su hijo sea Java y no le hable",
+            "¿Por qué los desarrolladores odian las escaleras? Porque prefieren las funciones recursivas"
+        ]
+        
+        # Comandos disponibles
+        self.comandos = {
+            'reproduce': self._reproducir_musica,
+            'detener': self._detener_reproduccion,
+            'hora': self._decir_hora,
+            'chiste': self._contar_chiste,
+            'mensaje': self._enviar_whatsapp,
+            'busca': self._buscar_google,
+            'cambiar de ventana': self._cambiar_ventana,
+            'quiero que digas': self._repetir_texto,
+            'cómo se dice': self._traducir,
+            'abrir': self._abrir_aplicacion,
+            'no escuches': self._pausa_temporal,
+            'escribir un archivo': self._escribir_archivo,
+            'cerrar ventana': self._cerrar_ventana,
+            'ayuda': self._mostrar_ayuda,
+            'salir': self._salir
+        }
+        
+        # Saludo inicial
+        self._saludar()
 
-dt = datetime.now()
-hora = dt.strftime('%H:%M')
+    def _configurar_voz(self) -> None:
+        """Configura las propiedades de la voz del asistente"""
+        try:
+            voices = self.engine.getProperty('voices')
+            if voices:
+                self.engine.setProperty('voice', voices[0].id)
+            self.engine.setProperty('rate', 145)
+            self.engine.setProperty('volume', 0.9)
+        except Exception as e:
+            logger.error(f"Error configurando voz: {e}")
 
-chiste = c.get_random_chiste()
+    def _saludar(self) -> None:
+        """Saluda al usuario al iniciar"""
+        saludo = f'Hola, yo soy tu asistente {self.nombre}. Di "ayuda" para ver todos los comandos disponibles.'
+        self.hablar(saludo)
 
-engine=pyttsx3.init()
-engine.say('Hola yo soy tu asistente '+nombre)
-engine.runAndWait()
+    def hablar(self, texto: str) -> None:
+        """Hace que el asistente hable"""
+        try:
+            self.engine.say(texto)
+            self.engine.runAndWait()
+        except Exception as e:
+            logger.error(f"Error al hablar: {e}")
+            print(f"Asistente: {texto}")
 
-voices=engine.getProperty('voices')
-engine.setProperty('voice', voices[0].id)
-engine.setProperty('rate', 145)
+    def escuchar(self) -> Optional[str]:
+        """Escucha y reconoce comandos de voz"""
+        try:
+            with sr.Microphone() as source:
+                print('🎤 Escuchando...')
+                self.recognizer.adjust_for_ambient_noise(source, duration=0.5)
+                audio = self.recognizer.listen(source, timeout=5, phrase_time_limit=10)
+                
+            texto = self.recognizer.recognize_google(audio, language="es-ES")
+            texto = texto.lower().strip()
+            print(f'📝 Has dicho: "{texto}"')
+            return texto
+            
+        except sr.WaitTimeoutError:
+            print("⏰ Tiempo de espera agotado")
+            return None
+        except sr.UnknownValueError:
+            print("❓ No pude entender lo que dijiste")
+            return None
+        except sr.RequestError as e:
+            logger.error(f"Error del servicio de reconocimiento: {e}")
+            self.hablar("Error de conexión con el servicio de reconocimiento de voz")
+            return None
+        except Exception as e:
+            logger.error(f"Error inesperado al escuchar: {e}")
+            return None
 
-def maquina(texto):
-    engine.say(texto)
-    engine.runAndWait()
+    def procesar_comando(self, texto: str) -> None:
+        """Procesa el comando reconocido"""
+        if not texto or self.nombre not in texto:
+            return
+            
+        # Remover el nombre del texto
+        comando_limpio = texto.replace(self.nombre, '').strip()
+        
+        # Buscar y ejecutar comando
+        for comando, funcion in self.comandos.items():
+            if comando in comando_limpio:
+                try:
+                    funcion(comando_limpio)
+                    return
+                except Exception as e:
+                    logger.error(f"Error ejecutando comando '{comando}': {e}")
+                    self.hablar(f"Hubo un error al ejecutar el comando {comando}")
+                    return
+        
+        self.hablar("No reconocí ese comando. Di 'ayuda' para ver los comandos disponibles.")
 
-traductor=Translator()
-texto_trad= 0
+    def _reproducir_musica(self, texto: str) -> None:
+        """Reproduce música en YouTube"""
+        cancion = texto.replace('reproduce', '').replace('play', '').strip()
+        if cancion:
+            self.hablar(f'Reproduciendo {cancion}')
+            pywhatkit.playonyt(cancion)
+        else:
+            self.hablar("¿Qué canción quieres reproducir?")
 
-def program():
-        while True:
+    def _detener_reproduccion(self, texto: str) -> None:
+        """Pausa/resume la reproducción"""
+        keyboard.press_and_release('space')
+        self.hablar("Reproducción pausada o reanudada")
+
+    def _decir_hora(self, texto: str) -> None:
+        """Dice la hora actual"""
+        now = datetime.now()
+        hora = now.strftime('%H:%M')
+        self.hablar(f'Son las {hora}')
+
+    def _contar_chiste(self, texto: str) -> None:
+        """Cuenta un chiste aleatorio"""
+        chiste = random.choice(self.chistes)
+        self.hablar(f'{chiste}. ¡Ja ja ja ja! ¿No está genial?')
+
+    def _enviar_whatsapp(self, texto: str) -> None:
+        """Envía mensaje por WhatsApp Web"""
+        try:
+            self.hablar('Di lentamente el número de la persona a la cual quieres enviarle el mensaje')
+            numero = self.escuchar()
+            
+            if not numero:
+                self.hablar("No pude escuchar el número")
+                return
+                
+            self.hablar('Ahora di el mensaje que quieres enviar')
+            mensaje = self.escuchar()
+            
+            if not mensaje:
+                self.hablar("No pude escuchar el mensaje")
+                return
+                
+            # Limpiar número (mantener solo dígitos)
+            numero_limpio = ''.join(filter(str.isdigit, numero))
+            
+            if len(numero_limpio) < 7:
+                self.hablar("El número parece incorrecto")
+                return
+                
+            self.hablar("Enviando mensaje...")
+            webbrowser.open(f'https://web.whatsapp.com/send?phone=+549261{numero_limpio}')
+            sleep(15)  # Esperar a que cargue WhatsApp Web
+            pyautogui.write(mensaje)
+            pyautogui.press('enter')
+            self.hablar("Mensaje enviado")
+            
+        except Exception as e:
+            logger.error(f"Error enviando WhatsApp: {e}")
+            self.hablar("Hubo un error al enviar el mensaje")
+
+    def _buscar_google(self, texto: str) -> None:
+        """Realiza búsqueda en Google"""
+        busqueda = texto.replace('busca', '').strip()
+        if busqueda:
+            self.hablar(f'Buscando {busqueda}')
+            webbrowser.open(f'https://www.google.com/search?q={busqueda}')
+        else:
+            self.hablar("¿Qué quieres buscar?")
+
+    def _cambiar_ventana(self, texto: str) -> None:
+        """Cambia entre ventanas abiertas"""
+        keyboard.press_and_release('alt+tab')
+        self.hablar("Cambiando ventana")
+
+    def _repetir_texto(self, texto: str) -> None:
+        """Repite el texto solicitado"""
+        repetir = texto.replace('quiero que digas', '').strip()
+        if repetir:
+            self.hablar(repetir)
+        else:
+            self.hablar("¿Qué quieres que diga?")
+
+    def _traducir(self, texto: str) -> None:
+        """Traduce texto a diferentes idiomas"""
+        texto_limpio = texto.replace('cómo se dice', '').strip()
+        
+        idiomas = {
+            'inglés': 'en',
+            'francés': 'fr', 
+            'portugués': 'pt',
+            'alemán': 'de'
+        }
+        
+        for idioma, codigo in idiomas.items():
+            if idioma in texto_limpio:
+                palabra = texto_limpio.replace(f'en {idioma}', '').strip()
+                if palabra:
+                    try:
+                        traduccion = self.traductor.translate(palabra, dest=codigo)
+                        self.hablar(f'En {idioma} se dice: {traduccion.text}')
+                        return
+                    except Exception as e:
+                        logger.error(f"Error traduciendo: {e}")
+                        self.hablar("Error al traducir")
+                        return
+        
+        self.hablar("No reconocí el idioma o la palabra a traducir")
+
+    def _abrir_aplicacion(self, texto: str) -> None:
+        """Abre diferentes aplicaciones"""
+        apps_web = {
+            'youtube': 'https://www.youtube.com',
+            'whatsapp': 'https://web.whatsapp.com',
+            'instagram': 'https://www.instagram.com',
+            'facebook': 'https://www.facebook.com'
+        }
+        
+        apps_desktop = {
+            'discord': 'discord',
+            'pseudocódigo': 'pseint',
+            'counter': 'Counter',
+            'minecraft': 'TLauncher',
+            'call of duty': 'Call of Duty Black Ops III',
+            'visual studio code': 'visual studio code'
+        }
+        
+        texto_limpio = texto.replace('abrir', '').strip()
+        
+        # Verificar aplicaciones web
+        for app, url in apps_web.items():
+            if app in texto_limpio:
+                self.hablar(f'Abriendo {app}')
+                webbrowser.open(url)
+                return
+        
+        # Verificar aplicaciones de escritorio
+        for app, nombre_app in apps_desktop.items():
+            if app in texto_limpio:
+                self.hablar(f'Abriendo {app}')
+                self._abrir_app_desktop(nombre_app)
+                return
+        
+        self.hablar("No reconocí esa aplicación")
+
+    def _abrir_app_desktop(self, nombre_app: str) -> None:
+        """Abre aplicación de escritorio usando el menú de Windows"""
+        keyboard.press_and_release('win')
+        sleep(2)
+        keyboard.write(nombre_app)
+        sleep(3)
+        keyboard.press_and_release('enter')
+
+    def _pausa_temporal(self, texto: str) -> None:
+        """Pausa el asistente temporalmente"""
+        self.hablar('¿Por cuántos segundos quieres que deje de escuchar?')
+        
+        respuesta = self.escuchar()
+        if respuesta:
             try:
-                with sr.Microphone() as source:
-                    print('Escuchando...')
-                    audio=r.listen(source)
-                    text=r.recognize_google(audio, language="es-ES")
-                    text=text.lower()
-                    print('Has dicho: {}'.format(text))
+                # Extraer número de segundos
+                segundos_str = ''.join(filter(str.isdigit, respuesta))
+                if segundos_str:
+                    segundos = int(segundos_str)
+                    if 1 <= segundos <= 300:  # Límite de 5 minutos
+                        self.hablar(f'Dejaré de escuchar durante {segundos} segundos')
+                        sleep(segundos)
+                        self.hablar('He vuelto. ¿Qué necesitas?')
+                        return
+                        
+                self.hablar("Número de segundos inválido")
+            except ValueError:
+                self.hablar("No entendí el tiempo")
+        else:
+            self.hablar("No pude escuchar el tiempo")
+
+    def _escribir_archivo(self, texto: str) -> None:
+        """Abre Word y permite dictado"""
+        try:
+            # Abrir Word
+            self.hablar("Abriendo Microsoft Word")
+            self._abrir_app_desktop('Word')
+            sleep(10)
+            keyboard.press_and_release('enter')  # Documento en blanco
+            sleep(5)
+            
+            self.hablar('¿Qué deseas escribir? Di "guardar archivo" cuando termines')
+            
+            while True:
+                texto_dictado = self.escuchar()
+                if not texto_dictado:
+                    continue
                     
-                    if nombre in text:
-                        text=text.replace(nombre, '')
-                        if 'reproduce' in text:
-                            text = text.replace('reproduce', '')
-                            text = text.replace('play', '')
-                            musica=text
-                            maquina('Reproduciendo'+text)
-                            pywhatkit.playonyt(musica)
-                        elif 'detener' in text:
-                                keyboard.press_and_release('space')
-                        elif 'hora' in text:
-                            try:
-                                maquina('Son las '+hora)
-                            except:
-                                print('Hubo un error en la condición chiste')
-                        elif 'chiste' in text:
-                            maquina(chiste+'JAJAJAJAJA ESTÁ RE BUENO JAJAJAJAJAJA')
-                        elif 'mensaje' in text:
-                            try:
-                                print('Diga lentamente el numero de la presona a la cual quiere enviarle el mensaje:')
-                                maquina('Diga lentamente el numero de la presona a la cual quiere enviarle el mensaje:')
-                                
-                                with sr.Microphone() as numero:
-                                    audio2=r.listen(numero)
-                                    number=r.recognize_google(audio2, language="es-ES")
-                                    print('Has dicho: {}'.format(number))
+                if 'guardar archivo' in texto_dictado:
+                    self._guardar_documento()
+                    break
+                elif 'borrar texto' in texto_dictado:
+                    keyboard.press_and_release('ctrl+z')
+                elif 'escribir título' in texto_dictado:
+                    titulo = texto_dictado.replace('escribir título', '').strip()
+                    if titulo:
+                        keyboard.press_and_release('ctrl+a')
+                        keyboard.write(titulo)
+                        keyboard.press_and_release('enter')
+                        keyboard.press_and_release('enter')
+                else:
+                    keyboard.write(texto_dictado + ' ')
+                    
+        except Exception as e:
+            logger.error(f"Error en escribir archivo: {e}")
+            self.hablar("Error al escribir archivo")
 
-                                print('Diga lentamente el mensaje que quiere enviar:')
-                                maquina('Diga lentamente el mensaje que quiere enviar:')
-                                
-                                with sr.Microphone() as mensaje:
-                                    audio3=r.listen(mensaje)
-                                    msj=r.recognize_google(audio3, language="es-ES")
-                                
-                                webbrowser.open('https://web.whatsapp.com/send?phone=+549261'+number)
-                                sleep(15)
-                                pyautogui.write(msj)
-                                pyautogui.press('enter')
-                            except:
-                                print('Hubo un error en la condición mensaje')
-                        elif 'busca' in text:
-                            text = text.replace('busca', '')
-                            maquina('Buscando '+text)
-                            webbrowser.open('https://www.google.com/search?q='+text)
-                        elif 'cambiar de ventana' in text:
-                            keyboard.press_and_release('alt + tab')
-                        elif 'quiero que digas' in text:
-                            try:
-                                text = text.replace('quiero que digas', '')
-                                maquina(text)
-                            except:
-                                print('Hubo un error en la condición repetir')
-                        elif 'cómo se dice' in text:
-                            text = text.replace('cómo se dice', '')
-                            if 'inglés' in text:
-                                text=text.replace('en inglés', '')
-                                texto_trad = traductor.translate(text, dest='en')
-                                maquina(f'se dice {texto_trad.text}')
-                            if 'francés' in text:
-                                text=text.replace('en francés', '')
-                                texto_trad = traductor.translate(text, dest='fr')
-                                maquina(f'se dice {texto_trad.text}')
-                            if 'portugués' in text:
-                                text=text.replace('en portugués', '')
-                                texto_trad = traductor.translate(text, dest='pt')
-                                maquina(f'se dice {texto_trad.text}')
-                            if 'alemán' in text:
-                                text=text.replace('en alemán', '')
-                                texto_trad = traductor.translate(text, dest='de')
-                                maquina(f'se dice {texto_trad.text}')
-                        elif 'abrir' in text:
-                            text=text.replace('abrir', '')
-                            if 'youtube' in text:
-                                maquina(f'abriendo {text}')
-                                webbrowser.open('https://www.youtube.com')
-                            if 'whatsapp' in text:
-                                maquina(f'abriendo {text}')
-                                webbrowser.open('https://web.whatsapp.com')
-                            if 'instagram' in text:
-                                maquina(f'abriendo {text}')
-                                webbrowser.open('https://www.instagram.com')
-                            if 'facebook' in text:
-                                maquina(f'abriendo {text}')
-                                webbrowser.open('https://www.facebook.com')
-                            if 'discord' in text:
-                                maquina(f'abriendo {text}')
-                                keyboard.press_and_release('win')
-                                sleep(3)
-                                keyboard.write('discord')
-                                sleep(5)
-                                keyboard.press_and_release('enter')
-                            if 'pseudocódigo' in text:
-                                maquina(f'abriendo {text}')
-                                keyboard.press_and_release('win')
-                                sleep(3)
-                                keyboard.write('pseint')
-                                sleep(5)
-                                keyboard.press_and_release('enter')
-                            if 'counter' in text:
-                                maquina(f'abriendo {text}')
-                                keyboard.press_and_release('win')
-                                sleep(3)
-                                keyboard.write('Counter')
-                                sleep(5)
-                                keyboard.press_and_release('enter')
-                            if 'minecraft' in text:
-                                maquina(f'abriendo {text}')
-                                keyboard.press_and_release('win')
-                                sleep(3)
-                                keyboard.write('TLauncher')
-                                sleep(5)
-                                keyboard.press_and_release('enter')
-                            if 'cal of duti' in text:
-                                maquina(f'abriendo {text}')
-                                keyboard.press_and_release('win')
-                                sleep(3)
-                                keyboard.write('Call of Duty Black Ops III')
-                                sleep(5)
-                                keyboard.press_and_release('enter')
-                            if 'visual studio code' in text:
-                                maquina(f'abriendo {text}')
-                                keyboard.press_and_release('win')
-                                sleep(3)
-                                keyboard.write('visual studio code')
-                                sleep(5)
-                                keyboard.press_and_release('enter')
-                        elif 'no escuches' in text:
-                            maquina('okey dime solo el lapso de tiempo en segundos por el que no quieres que escuche')
-                            with sr.Microphone() as no_esc:
-                                audio2=r.listen(no_esc)
-                                no_list=r.recognize_google(audio2, language="es-ES")
-                            no_list = no_list.replace('segundos', '')
-                            no_list = int(no_list)
-                            maquina(f'Dejaré de escuchar durante {no_list} segundos')
-                            sleep(no_list)
-                            maquina('He vuelto, que necesitas?')
-                        elif 'escribir un archivo' in text:
-                            keyboard.press_and_release('win')
-                            sleep(3)
-                            keyboard.write('Word')
-                            sleep(5)
-                            keyboard.press_and_release('enter')
-                            sleep(10)
-                            keyboard.press_and_release('enter')
-                            maquina('que desea escribir?')
-                            while True:
-                                with sr.Microphone() as escribir:
-                                    audio5=r.listen(escribir)
-                                    write=r.recognize_google(audio5, language="es-ES")
-                                    write=write.lower() 
-                                
-                                if 'guardar archivo' in write:
-                                    write = write.replace('guardar archivo', '')
-                                    keyboard.press_and_release('ctrl+g')
-                                    sleep(5)
-                                    keyboard.press_and_release('enter')
-                                    sleep(3)
-                                    keyboard.press_and_release('enter')
-                                    sleep(3)
-                                    keyboard.press_and_release('down arrow')
-                                    keyboard.press_and_release('enter')
-                                    sleep(1)
-                                    keyboard.press_and_release('supr')
-                                    maquina('Que nombre desea ponerle al archivo?')
+    def _guardar_documento(self) -> None:
+        """Guarda el documento de Word"""
+        try:
+            keyboard.press_and_release('ctrl+s')
+            sleep(3)
+            
+            self.hablar('¿Qué nombre quieres darle al archivo?')
+            nombre = self.escuchar()
+            
+            if nombre:
+                keyboard.write(nombre)
+                sleep(2)
+                keyboard.press_and_release('enter')
+                self.hablar('Archivo guardado exitosamente')
+            else:
+                keyboard.press_and_release('escape')
+                self.hablar('Guardado cancelado')
+                
+        except Exception as e:
+            logger.error(f"Error guardando: {e}")
+            self.hablar("Error al guardar archivo")
 
-                                    with sr.Microphone() as escribir:
-                                        audio5=r.listen(escribir)
-                                        write=r.recognize_google(audio5, language="es-ES")
-                                        write=write.lower()
+    def _cerrar_ventana(self, texto: str) -> None:
+        """Cierra la ventana actual"""
+        keyboard.press_and_release('alt+f4')
+        self.hablar("Ventana cerrada")
 
-                                    keyboard.write(write)
-                                    sleep(5)
-                                    keyboard.press_and_release('enter')
-                                    maquina('archivo guardado')
-                                    break
+    def _mostrar_ayuda(self, texto: str) -> None:
+        """Muestra los comandos disponibles"""
+        ayuda = """
+        Comandos disponibles:
+        - Reproduce [canción]: Reproduce música en YouTube
+        - Detener: Pausa la reproducción
+        - Hora: Te dice la hora actual
+        - Chiste: Cuenta un chiste
+        - Mensaje: Envía mensaje por WhatsApp
+        - Busca [término]: Busca en Google
+        - Cambiar de ventana: Alterna entre ventanas
+        - Quiero que digas [texto]: Repite el texto
+        - Cómo se dice [palabra] en [idioma]: Traduce palabras
+        - Abrir [aplicación]: Abre aplicaciones
+        - No escuches: Pausa temporal del asistente
+        - Escribir un archivo: Abre Word para dictado
+        - Cerrar ventana: Cierra ventana actual
+        - Salir: Termina el programa
+        """
+        print(ayuda)
+        self.hablar("He mostrado todos los comandos en pantalla")
 
-                                elif 'borrar texto' in write:
-                                    keyboard.press_and_release('ctrl+z')
-                                    write = write.replace(write, '')
+    def _salir(self, texto: str) -> None:
+        """Termina el programa"""
+        self.hablar("Hasta luego. ¡Fue un placer ayudarte!")
+        self.running = False
 
-                                elif 'escribir título' in write:
-                                    write = write.replace('escribir título', '')
-                                    keyboard.press_and_release('ctrl+t')
-                                    keyboard.write(write)
-                                    sleep(3)
-                                    keyboard.press_and_release('enter')
-                                    keyboard.press_and_release('ctrl+q')
-                                    write = write.replace(write, '')
-
-                                keyboard.write(write)
-                                keyboard.write(' ')
-                        elif 'cerrar ventana' in text:
-                            keyboard.press_and_release('alt+F4')
-            except:
-                print('Hubo un error en la ejecución')
-                maquina('Hubo un error en la ejecución, probablemente sea el micrófono')
+    def ejecutar(self) -> None:
+        """Bucle principal del asistente"""
+        logger.info("Asistente de voz iniciado")
+        
+        while self.running:
+            try:
+                texto = self.escuchar()
+                if texto:
+                    self.procesar_comando(texto)
+                    
+            except KeyboardInterrupt:
+                self.hablar("Programa interrumpido por el usuario")
                 break
-program()
+            except Exception as e:
+                logger.error(f"Error inesperado: {e}")
+                self.hablar("Hubo un error inesperado. Continuando...")
+                
+        logger.info("Asistente de voz finalizado")
+
+def main():
+    """Función principal"""
+    print("=" * 60)
+    print("🎤 ASISTENTE DE VOZ PERSONAL - VERSIÓN OPTIMIZADA 2025")
+    print("=" * 60)
+    print("📋 Funciones disponibles:")
+    print("   • Reproducción de música en YouTube")
+    print("   • Información de hora y chistes")
+    print("   • Envío de mensajes por WhatsApp")
+    print("   • Búsquedas en Google")
+    print("   • Traducciones a múltiples idiomas")
+    print("   • Apertura de aplicaciones")
+    print("   • Creación de documentos Word")
+    print("   • Y mucho más...")
+    print("=" * 60)
+    print("💡 Di 'Santiago ayuda' para ver todos los comandos")
+    print("💡 Di 'Santiago salir' para terminar el programa")
+    print("=" * 60)
+    
+    try:
+        asistente = VoiceAssistant()
+        asistente.ejecutar()
+    except Exception as e:
+        logger.error(f"Error fatal: {e}")
+        print("❌ Error fatal al inicializar el asistente")
+
+if __name__ == "__main__":
+    main()
